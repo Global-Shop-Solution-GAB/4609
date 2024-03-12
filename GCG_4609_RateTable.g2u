@@ -1,0 +1,154 @@
+Program.Sub.ScreenSU.Start
+Gui.fRtTableFrm..Create
+Gui.fRtTableFrm..Caption("fRtTableFrm")
+Gui.fRtTableFrm..Size(13545,7635)
+Gui.fRtTableFrm..MinX(0)
+Gui.fRtTableFrm..MinY(0)
+Gui.fRtTableFrm..Position(0,0)
+Gui.fRtTableFrm..BackColor(-2147483633)
+Gui.fRtTableFrm..MousePointer(0)
+Gui.fRtTableFrm..Event(UnLoad,fRtTableFrm_UnLoad)
+Gui.fRtTableFrm.GsGCRtTable1.Create(GsGridControl)
+Gui.fRtTableFrm.GsGCRtTable1.Size(13380,7290)
+Gui.fRtTableFrm.GsGCRtTable1.Position(15,30)
+Program.Sub.ScreenSU.End
+
+Program.Sub.Preflight.Start
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+f.Intrinsic.Control.Try
+f.ODBC.Connection!conx.openconnection(v.Ambient.PDSN,V.Ambient.PUser,V.Ambient.PPass)
+'check for populate hook and change script 1 btn label
+f.Intrinsic.Control.If(v.Caller.Hook,=,10260)
+	v.passed.000201.Set("Rate Table")
+f.Intrinsic.Control.ElseIf(v.Caller.Hook,=,10670)
+'run rate table sub opened if from quote line screen
+	f.intrinsic.Control.CallSub(RateTable)
+f.Intrinsic.Control.EndIf
+f.Intrinsic.Control.Catch
+	f.Intrinsic.Control.CallSub(catching,"sub",v.Ambient.CurrentSubroutine,"errorno",v.Ambient.ErrorNumber,"errordesc",v.Ambient.ErrorDescription)
+f.Intrinsic.Control.EndTry
+
+Program.Sub.Main.End
+
+Program.Sub.fRtTableFrm_UnLoad.Start
+f.odbc.Connection!conx.Close
+f.Intrinsic.Control.End
+
+Program.Sub.fRtTableFrm_UnLoad.End
+
+Program.Sub.RateTable.Start
+f.Intrinsic.Control.Try
+v.Local.sSql.Declare(string)
+v.Local.sSum.Declare(string)
+v.Local.sCustNm.Declare(string)
+v.Local.sQty.Declare(string)
+v.Local.sQtyHd.Declare(string)
+v.Local.sPrice.Declare(string)
+v.Local.sPriceHd.Declare(string)
+v.Local.sfilter.Declare(string)
+v.Local.iCount.Declare(long)
+v.Local.iCheck.Declare(long)
+v.Local.iCol.Declare(long,0)
+
+
+
+'create data table with part for the particular customer
+f.Intrinsic.string.Build("Select DISTINCT Part from V_OE_C_PART_PRICE where customer = '{0}'",v.passed.000112,V.Local.sSql)
+F.data.DataTable.CreateFromSQL("RateHd","conx",v.Local.sSql,true)
+'create dictionary with xref info
+f.Intrinsic.String.Build("Select Part,customer_part from V_INV_CROSS_REF where customer = '{0}'",v.passed.000112,v.Local.sSql)
+f.Data.Dictionary.CreateFromSQL("xref","conx",v.local.sSql)
+f.Data.Dictionary.SetDefaultReturn("xref","")
+'add additional column to denote cross referenced customer part number and fill it from xref dictionary
+f.data.DataTable.AddColumn("RateHd","customer_part","string")
+f.Data.DataTable.FillFromDictionary("RateHd","xref","part","customer_part")
+'create dictionary description from inventory
+v.Local.sSql.Set("Select Part, Description from V_INVENTORY_MSTR")
+f.Data.Dictionary.CreateFromSQL("partdesc","conx",v.local.sSql)
+f.Data.Dictionary.SetDefaultReturn("partdesc","")
+'add additional column to denote description and fill it from partdesc dictionary
+f.Data.DataTable.AddColumn("RateHd","Description","String")
+f.Data.Datatable.FillFromDictionary("RateHd","partdesc","part","Description")
+'create rate header view
+f.Data.DataView.Create("RateHd","RateHdVw",22)
+'create data table with quantity price breakdown for part
+f.Intrinsic.String.Build("select Part,Date_effective,QB_QTY_1,QB_PRICE_1,QB_QTY_2,QB_PRICE_2,QB_QTY_3,QB_PRICE_3,QB_QTY_4,QB_PRICE_4,QB_QTY_5,QB_PRICE_5,QB_QTY_6,QB_PRICE_6,QB_QTY_7,QB_PRICE_7,QB_QTY_8,QB_PRICE_8,QB_QTY_9,QB_PRICE_9,QB_QTY_10,QB_PRICE_10 from V_OE_C_PART_PRICE where customer = '{0}' order by part,date_effective Desc",v.passed.000112,v.Local.sSql)
+f.Data.DataTable.CreateFromSQL("RateHd$RateLn","conx",V.Local.sSql,true)
+'check for empty quantity and price columns and delete them
+f.Intrinsic.Control.For(v.Local.iCount,1,10,1)
+	f.Intrinsic.String.Build("Sum(QB_QTY_{0})",v.Local.iCount,v.Local.sSum)
+	f.Data.DataTable.Compute("RateHd$RateLn",v.Local.sSum,"",v.Local.iCheck)
+	f.Intrinsic.Control.If(v.Local.iCheck,=,0)
+		f.Intrinsic.String.Build("QB_QTY_{0}",v.Local.iCount,v.Local.sQty)
+		f.Intrinsic.String.Build("QB_PRICE_{0}",v.Local.iCount,v.Local.sPrice)
+		f.Data.Datatable.RemoveColumn("RateHd$RateLn",v.Local.sQty)
+		f.Data.Datatable.RemoveColumn("RateHd$RateLn",v.Local.sPrice)
+	f.Intrinsic.control.Else
+		'to be used for formating existing columns
+		f.intrinsic.Math.Add(v.local.iCol,1,v.Local.iCol)
+	f.Intrinsic.Control.EndIf	
+f.Intrinsic.Control.Next(v.Local.iCount)
+'create data view for child
+F.Data.DataView.Create("RateHd$RateLn","RateLnVw",22)
+'add relation between parent and child
+f.Data.DataTable.AddRelation("RateHd","Part","RateHd$RateLn","Part")
+'add data view to grid view
+gui.fRtTableFrm.GsGCRtTable1.AddGridviewFromDataview("RateHd_Grid","RateHd","RateHdVw")
+gui.fRtTableFrm.GsGCRtTable1.AddGridviewFromDataview("Rateln_Grid","RateHd","RateLnVw")
+'format Rate header properties
+gui.fRtTableFrm.GsGCRtTable1.SetColumnProperty("RateHd_Grid","Part", "headerforecolor","DarkGreen")
+gui.fRtTableFrm.GsGCRtTable1.SetColumnProperty("RateHd_Grid","Part", "headerfontbold",True)
+gui.fRtTableFrm.GsGCRtTable1.SetColumnProperty("RateHd_Grid","Part", "CellFontBold",True)
+gui.fRtTableFrm.GsGCRtTable1.SetColumnProperty("RateHd_Grid","customer_part", "Caption","Customer Part")
+gui.fRtTableFrm.GsGCRtTable1.SetColumnProperty("RateHd_Grid","customer_part", "headerforecolor","DarkGreen")
+gui.fRtTableFrm.GsGCRtTable1.SetColumnProperty("RateHd_Grid","customer_part", "headerfontbold",True)
+gui.fRtTableFrm.GsGCRtTable1.SetColumnProperty("RateHd_Grid","customer_part", "CellFontBold",True)
+gui.fRtTableFrm.GsGCRtTable1.SetColumnProperty("RateHd_Grid","Description", "headerforecolor","DarkGreen")
+gui.fRtTableFrm.GsGCRtTable1.SetColumnProperty("RateHd_Grid","Description", "headerfontbold",True)
+gui.fRtTableFrm.GsGCRtTable1.SetColumnProperty("RateHd_Grid","Description", "CellFontBold",True)
+gui.fRtTableFrm.GsGCRtTable1.MainView("RateHd_Grid")
+'format rate line header properties
+gui.fRtTableFrm.GsGCRtTable1.SetColumnProperty("RateLn_Grid","Part", "headerfontbold",True)
+gui.fRtTableFrm.GsGCRtTable1.SetColumnProperty("RateLn_Grid","Part", "headerforecolor","DarkBlue")
+gui.fRtTableFrm.GsGCRtTable1.SetColumnProperty("RateLn_Grid","Date_Effective", "Caption","Date Effective")
+gui.fRtTableFrm.GsGCRtTable1.SetColumnProperty("RateLn_Grid","Date_Effective", "headerfontbold",True)
+gui.fRtTableFrm.GsGCRtTable1.SetColumnProperty("RateLn_Grid","Date_Effective", "DisplayCustomDatetime","d")
+gui.fRtTableFrm.GsGCRtTable1.SetColumnProperty("RateLn_Grid","Date_Effective", "headerforecolor","DarkBlue")
+'check for existing quantity and price columns in rate line and format them
+f.Intrinsic.Control.For(v.Local.iCount,1,v.Local.icol,1)
+	f.Intrinsic.String.Build("QB_QTY_{0}",v.Local.iCount,v.Local.sQty)
+	gui.fRtTableFrm.GsGCRtTable1.SetColumnProperty("RateLn_Grid",v.Local.sQty, "headerfontbold",True)
+	gui.fRtTableFrm.GsGCRtTable1.SetColumnProperty("RateLn_Grid",v.Local.sQty, "headerforecolor","DarkBlue")
+	f.Intrinsic.String.Build("Qty Break {0}",v.Local.iCount,v.Local.sQtyHd)
+	gui.fRtTableFrm.GsGCRtTable1.SetColumnProperty("RateLn_Grid",v.Local.sQty, "Caption",v.Local.sQtyHd)
+	f.Intrinsic.String.Build("QB_Price_{0}",v.Local.iCount,v.Local.sPrice)
+	gui.fRtTableFrm.GsGCRtTable1.SetColumnProperty("RateLn_Grid",v.Local.sPrice, "headerfontbold",True)
+	gui.fRtTableFrm.GsGCRtTable1.SetColumnProperty("RateLn_Grid",v.Local.sPrice, "headerforecolor","DarkBlue")
+	f.Intrinsic.String.Build("Price Break {0}",v.Local.iCount,v.Local.sPriceHd)
+	gui.fRtTableFrm.GsGCRtTable1.SetColumnProperty("RateLn_Grid",v.Local.sPrice, "Caption",v.Local.sPriceHd)
+f.Intrinsic.Control.Next(v.Local.iCount)
+gui.fRtTableFrm.GsGCRtTable1.Anchor(15)
+'caption form with customer
+f.Intrinsic.String.Build("Rate Table for Customer {0}",v.PASSED.000112,v.Local.sCustNm)
+gui.fRtTableFrm..Caption(v.Local.sCustNm)
+
+
+
+gui.fRtTableFrm..Show
+f.Intrinsic.Control.Catch
+	f.Intrinsic.Control.CallSub(catching,"sub",v.Ambient.CurrentSubroutine,"errorno",v.Ambient.ErrorNumber,"errordesc",v.Ambient.ErrorDescription)
+f.Intrinsic.Control.EndTry
+Program.Sub.RateTable.End
+
+Program.Sub.catching.Start
+v.Local.sError.declare(string)
+Function.Intrinsic.String.Concat(v.Ambient.Now,": Project: GCG_4609_RateTable.g2u",V.Ambient.Newline,V.Ambient.Newline,"Subroutine: ",v.Args.sub,V.Ambient.NewLine,"Error Occurred ",V.Args.errorno," with description ",V.args.errordesc,V.Local.sError)
+f.Intrinsic.UI.Msgbox(v.Local.sError)
+f.Intrinsic.Control.CallSub(fRtTableFrm_UnLoad)
+Program.Sub.catching.End
+
+Program.Sub.Comments.Start
+${$0$}$$}$$}$12:00:00 AM$}$False
+Program.Sub.Comments.End
